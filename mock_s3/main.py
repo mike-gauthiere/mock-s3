@@ -3,11 +3,10 @@ import logging
 import os
 import sys
 import urlparse
-import xml.etree.ElementTree as ET
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
-from actions import delete_item, delete_items, get_acl, get_item, list_buckets, ls_bucket
+from actions import get_acl, get_item, list_buckets, ls_bucket
 from file_store import FileStore
 
 
@@ -61,39 +60,11 @@ class S3Handler(BaseHTTPRequestHandler):
             get_item(self, bucket_name, item_name)
 
         else:
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
             self.wfile.write('%s: [%s] %s' % (req_type, bucket_name, item_name))
 
     def do_DELETE(self):
-        parsed_path = urlparse.urlparse(self.path)
-        qs = urlparse.parse_qs(parsed_path.query, True)
-        host = self.headers['host'].split(':')[0]
-        path = parsed_path.path
-        bucket_name = None
-        item_name = None
-
-        mock_hostname = self.server.mock_hostname
-        if host != mock_hostname and mock_hostname in host:
-            idx = host.index(mock_hostname)
-            bucket_name = host[:idx-1]
-
-        if not bucket_name:
-            bucket_name, sep, item_name = path.strip('/').partition('/')
-        else:
-            item_name = path.strip('/')
-
-        if bucket_name and item_name:
-            delete_item(self, bucket_name, item_name)
-        else:
-            self.wfile.write('%s: [%s] %s' % ('DELETE', bucket_name, item_name))
-
-        self.send_response(204)
-        self.send_header('Content-Length', '0')
-        self.end_headers()
-
-    def do_HEAD(self):
-        return self.do_GET()
-
-    def do_POST(self):
         parsed_path = urlparse.urlparse(self.path)
         qs = urlparse.parse_qs(parsed_path.query, True)
         host = self.headers['host'].split(':')[0]
@@ -107,8 +78,8 @@ class S3Handler(BaseHTTPRequestHandler):
             idx = host.index(mock_hostname)
             bucket_name = host[:idx-1]
 
-        if path == '/' and bucket_name and 'delete' in qs:
-            req_type = 'delete_keys'
+        if path == '/' and bucket_name:
+            req_type = 'delete_bucket'
 
         else:
             if not bucket_name:
@@ -116,19 +87,34 @@ class S3Handler(BaseHTTPRequestHandler):
             else:
                 item_name = path.strip('/')
 
-            if not item_name and 'delete' in qs:
-                req_type = 'delete_keys'
+            if not item_name:
+                req_type = 'delete_bucket'
+            else:
+                req_type = 'delete'
 
-        if req_type == 'delete_keys':
-            size = int(self.headers['content-length'])
-            data = self.rfile.read(size)
-            root = ET.fromstring(data)
-            keys = []
-            for obj in root.findall('Object'):
-                keys.append(obj.find('Key').text)
-            delete_items(self, bucket_name, keys)
-        else:
-            self.wfile.write('%s: [%s] %s' % (req_type, bucket_name, item_name))
+        if req_type == 'delete_bucket':
+            self.server.file_store.delete_bucket(bucket_name)
+            self.send_response(204)
+
+        elif req_type == 'delete':
+            bucket = self.server.file_store.get_bucket(bucket_name)
+            if not bucket:
+                self.send_response(404, 'No such bucket')
+            else:
+                self.server.file_store.delete_item(bucket, item_name)
+                self.send_response(204)
+
+        self.send_header('Content-Type', 'text/xml')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+
+    def do_HEAD(self):
+        return self.do_GET()
+    
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
 
     def do_PUT(self):
         parsed_path = urlparse.urlparse(self.path)
@@ -185,6 +171,7 @@ class S3Handler(BaseHTTPRequestHandler):
             self.send_response(200)
 
         self.send_header('Content-Type', 'text/xml')
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
 
 

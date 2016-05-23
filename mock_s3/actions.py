@@ -7,6 +7,7 @@ import xml_templates
 def list_buckets(handler):
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/xml')
+    handler.send_header('Access-Control-Allow-Origin', '*')
     handler.end_headers()
     buckets = handler.server.file_store.buckets
     xml = ''
@@ -28,6 +29,7 @@ def ls_bucket(handler, bucket_name, qs):
         bucket_query = handler.server.file_store.get_all_keys(bucket, **kwargs)
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/xml')
+        handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         contents = ''
         for s3_item in bucket_query.matches:
@@ -37,6 +39,7 @@ def ls_bucket(handler, bucket_name, qs):
     else:
         handler.send_response(404)
         handler.send_header('Content-Type', 'application/xml')
+        handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         xml = xml_templates.error_no_such_bucket_xml.format(name=bucket_name)
         handler.wfile.write(xml)
@@ -45,6 +48,7 @@ def ls_bucket(handler, bucket_name, qs):
 def get_acl(handler):
     handler.send_response(200)
     handler.send_header('Content-Type', 'application/xml')
+    handler.send_header('Access-Control-Allow-Origin', '*')
     handler.end_headers()
     handler.wfile.write(xml_templates.acl_xml)
 
@@ -85,13 +89,14 @@ def get_item(handler, bucket_name, item_name):
         handler.send_header('Last-Modified', last_modified)
         handler.send_header('Etag', item.md5)
         handler.send_header('Accept-Ranges', 'bytes')
-        range_ = handler.headers['bytes'].split('=')[1]
-        start = int(range_.split('-')[0])
-        finish = int(range_.split('-')[1])
+        range = handler.headers['bytes'].split('=')[1]
+        start = int(range.split('-')[0])
+        finish = int(range.split('-')[1])
         if finish == 0:
             finish = content_length - 1
         bytes_to_read = finish - start + 1
         handler.send_header('Content-Range', 'bytes %s-%s/%s' % (start, finish, content_length))
+        handler.send_header('Access-Control-Allow-Origin', '*')
         handler.end_headers()
         item.io.seek(start)
         handler.wfile.write(item.io.read(bytes_to_read))
@@ -103,22 +108,7 @@ def get_item(handler, bucket_name, item_name):
     handler.send_header('Accept-Ranges', 'bytes')
     handler.send_header('Content-Type', item.content_type)
     handler.send_header('Content-Length', content_length)
+    handler.send_header('Access-Control-Allow-Origin', '*')
     handler.end_headers()
     if handler.command == 'GET':
         handler.wfile.write(item.io.read())
-
-
-def delete_item(handler, bucket_name, item_name):
-    handler.server.file_store.delete_item(bucket_name, item_name)
-
-
-def delete_items(handler, bucket_name, keys):
-    handler.send_response(200)
-    handler.send_header('Content-Type', 'application/xml')
-    handler.end_headers()
-    xml = ''
-    for key in keys:
-        delete_item(handler, bucket_name, key)
-        xml += xml_templates.deleted_deleted_xml.format(key=key)
-    xml = xml_templates.deleted_xml.format(contents=xml)
-    handler.wfile.write(xml)
